@@ -1,9 +1,11 @@
 '''
-	Original by dzhu
-		https://github.com/dzhu/myo-raw
+    Original by dzhu
+        https://github.com/dzhu/myo-raw
 
-	Edited by Fernando Cosentino
-		http://www.fernandocosentino.net/pyoconnect
+    Edited by Fernando Cosentino for the recording framework
+        http://www.fernandocosentino.net/pyoconnect
+
+    Edited by Gabriel Antoniak to establish the procedure
 '''
 
 
@@ -19,7 +21,8 @@ import time
 import serial
 from serial.tools.list_ports import comports
 
-from common import *
+from common import pack, unpack
+
 
 def multichr(ords):
     if sys.version_info[0] >= 3:
@@ -27,21 +30,25 @@ def multichr(ords):
     else:
         return ''.join(map(chr, ords))
 
+
 def multiord(b):
     if sys.version_info[0] >= 3:
         return list(b)
     else:
         return map(ord, b)
 
+
 class Arm(enum.Enum):
     UNKNOWN = 0
     RIGHT = 1
     LEFT = 2
 
+
 class XDirection(enum.Enum):
     UNKNOWN = 0
     X_TOWARD_WRIST = 1
     X_TOWARD_ELBOW = 2
+
 
 class Pose(enum.Enum):
     REST = 0
@@ -50,8 +57,9 @@ class Pose(enum.Enum):
     WAVE_OUT = 3
     FINGERS_SPREAD = 4
     THUMB_TO_PINKY = 5
-    UNKNOWN = 255	 
-    
+    UNKNOWN = 255
+
+
 class Packet(object):
     def __init__(self, ords):
         self.typ = ords[0]
@@ -73,14 +81,16 @@ class BT(object):
         self.lock = threading.Lock()
         self.handlers = []
 
-    ## internal data-handling methods
+    # internal data-handling methods
     def recv_packet(self, timeout=None):
         t0 = time.time()
         self.ser.timeout = None
         while timeout is None or time.time() < t0 + timeout:
-            if timeout is not None: self.ser.timeout = t0 + timeout - time.time()
+            if timeout is not None:
+                self.ser.timeout = t0 + timeout - time.time()
             c = self.ser.read()
-            if not c: return None
+            if not c:
+                return None
 
             ret = self.proc_byte(ord(c))
             if ret:
@@ -93,7 +103,8 @@ class BT(object):
         t0 = time.time()
         while time.time() < t0 + timeout:
             p = self.recv_packet(t0 + timeout - time.time())
-            if not p: return res
+            if not p:
+                return res
             res.append(p)
         return res
 
@@ -123,11 +134,14 @@ class BT(object):
         self.handlers.append(h)
 
     def remove_handler(self, h):
-        try: self.handlers.remove(h)
-        except ValueError: pass
+        try:
+            self.handlers.remove(h)
+        except ValueError:
+            pass
 
     def wait_event(self, cls, cmd):
         res = [None]
+
         def h(p):
             if p.cls == cls and p.cmd == cmd:
                 res[0] = p
@@ -137,9 +151,10 @@ class BT(object):
         self.remove_handler(h)
         return res[0]
 
-    ## specific BLE commands
+    # specific BLE commands
     def connect(self, addr):
-        return self.send_command(6, 3, pack('6sBHHHH', multichr(addr), 0, 6, 6, 64, 0))
+        return self.send_command(6, 3, pack('6sBHHHH',
+                                            multichr(addr), 0, 6, 6, 64, 0))
 
     def get_connections(self):
         return self.send_command(0, 6)
@@ -168,10 +183,11 @@ class BT(object):
         while True:
             p = self.recv_packet()
 
-            ## no timeout, so p won't be None
-            if p.typ == 0: return p
+            # no timeout, so p won't be None
+            if p.typ == 0:
+                return p
 
-            ## not a response: must be an event
+            # not a response: must be an event
             self.handle_event(p)
 
 
@@ -203,13 +219,13 @@ class MyoRaw(object):
         self.bt.recv_packet(timeout)
 
     def connect(self):
-        ## stop everything from before
+        # stop everything from before
         self.bt.end_scan()
         self.bt.disconnect(0)
         self.bt.disconnect(1)
         self.bt.disconnect(2)
 
-        ## start scanning
+        # start scanning
         print('scanning...')
         self.bt.discover()
         while True:
@@ -221,12 +237,12 @@ class MyoRaw(object):
                 break
         self.bt.end_scan()
 
-        ## connect and wait for status event
+        # connect and wait for status event
         conn_pkt = self.bt.connect(addr)
         self.conn = multiord(conn_pkt.payload)[-1]
         self.bt.wait_event(3, 0)
 
-        ## get firmware version
+        # get firmware version
         fw = self.read_attr(0x17)
         _, _, _, _, v0, v1, v2, v3 = unpack('BHBBHHHH', fw.payload)
         print('firmware version: %d.%d.%d.%d' % (v0, v1, v2, v3))
@@ -234,58 +250,62 @@ class MyoRaw(object):
         self.old = (v0 == 0)
 
         if self.old:
-            ## don't know what these do; Myo Connect sends them, though we get data
-            ## fine without them
+            # don't know what these do; Myo Connect sends them,
+            # though we get data
+            # fine without them
             self.write_attr(0x19, b'\x01\x02\x00\x00')
             self.write_attr(0x2f, b'\x01\x00')
             self.write_attr(0x2c, b'\x01\x00')
             self.write_attr(0x32, b'\x01\x00')
             self.write_attr(0x35, b'\x01\x00')
 
-            ## enable EMG data
+            # enable EMG data
             self.write_attr(0x28, b'\x01\x00')
-            ## enable IMU data
+            # enable IMU data
             self.write_attr(0x1d, b'\x01\x00')
 
-            ## Sampling rate of the underlying EMG sensor, capped to 1000. If it's
-            ## less than 1000, emg_hz is correct. If it is greater, the actual
-            ## framerate starts dropping inversely. Also, if this is much less than
-            ## 1000, EMG data becomes slower to respond to changes. In conclusion,
-            ## 1000 is probably a good value.
+            # Sampling rate of the underlying EMG sensor, capped to 1000.
+            # If it's less than 1000, emg_hz is correct. If it is greater,
+            # the actual framerate starts dropping inversely. Also, if this is
+            # much less than 1000, EMG data becomes slower to respond to
+            # changes. In conclusion, 1000 is probably a good value.
+
             C = 1000
-            emg_hz = 50
-            ## strength of low-pass filtering of EMG data
+            emg_hz = 200
+            # strength of low-pass filtering of EMG data
             emg_smooth = 100
 
             imu_hz = 50
 
-            ## send sensor parameters, or we don't get any data
-            self.write_attr(0x19, pack('BBBBHBBBBB', 2, 9, 2, 1, C, emg_smooth, C // emg_hz, imu_hz, 0, 0))
+            # send sensor parameters, or we don't get any data
+            self.write_attr(0x19, pack('BBBBHBBBBB', 2, 9, 2, 1, C,
+                                       emg_smooth, C // emg_hz, imu_hz, 0, 0))
 
         else:
             name = self.read_attr(0x03)
             print('device name: %s' % name.payload)
 
-            ## enable IMU data
+            # enable IMU data
             self.write_attr(0x1d, b'\x01\x00')
-            ## enable on/off arm notifications
+            # enable on/off arm notifications
             self.write_attr(0x24, b'\x02\x00')
 
             # self.write_attr(0x19, b'\x01\x03\x00\x01\x01')
             self.start_raw()
 
-        ## add data handlers
+        # add data handlers
         def handle_data(p):
-            if (p.cls, p.cmd) != (4, 5): return
+            if (p.cls, p.cmd) != (4, 5):
+                return
 
             c, attr, typ = unpack('BHB', p.payload[:4])
             pay = p.payload[5:]
 
             if attr == 0x27:
                 vals = unpack('8HB', pay)
-                ## not entirely sure what the last byte is, but it's a bitmask that
-                ## seems to indicate which sensors think they're being moved around or
-                ## something
+                # not entirely sure what the last byte is, but it's a bitmask
+                # that seems to indicate which sensors think they're being
+                # moved around or something
                 emg = vals[:8]
                 moving = vals[8]
                 self.on_emg(emg, moving)
@@ -296,19 +316,18 @@ class MyoRaw(object):
                 gyro = vals[7:10]
                 self.on_imu(quat, acc, gyro)
             elif attr == 0x23:
-                typ, val, xdir, _,_,_ = unpack('6B', pay)
+                typ, val, xdir, _, _, _ = unpack('6B', pay)
 
-                if typ == 1: # on arm
+                if typ == 1:  # on arm
                     self.on_arm(Arm(val), XDirection(xdir))
-                elif typ == 2: # removed from arm
+                elif typ == 2:  # removed from arm
                     self.on_arm(Arm.UNKNOWN, XDirection.UNKNOWN)
-                elif typ == 3: # pose
+                elif typ == 3:  # pose
                     self.on_pose(Pose(val))
             else:
                 print('data with unknown attr: %02X %s' % (attr, p))
 
         self.bt.add_handler(handle_data)
-
 
     def write_attr(self, attr, val):
         if self.conn is not None:
@@ -324,18 +343,18 @@ class MyoRaw(object):
             self.bt.disconnect(self.conn)
 
     def start_raw(self):
-        '''Sending this sequence for v1.0 firmware seems to enable both raw data and
-        pose notifications.
+        '''Sending this sequence for v1.0 firmware seems to enable both raw
+        data and pose notifications.
         '''
 
         self.write_attr(0x28, b'\x01\x00')
-        #self.write_attr(0x19, b'\x01\x03\x01\x01\x00')
+        # self.write_attr(0x19, b'\x01\x03\x01\x01\x00')
         self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
 
     def mc_start_collection(self):
         '''Myo Connect sends this sequence (or a reordering) when starting data
-        collection for v1.0 firmware; this enables raw data but disables arm and
-        pose notifications.
+        collection for v1.0 firmware; this enables raw data but disables arm
+        and pose notifications.
         '''
 
         self.write_attr(0x28, b'\x01\x00')
@@ -352,9 +371,9 @@ class MyoRaw(object):
         self.write_attr(0x19, b'\x01\x03\x01\x01\x00')
 
     def mc_end_collection(self):
-        '''Myo Connect sends this sequence (or a reordering) when ending data collection
-        for v1.0 firmware; this reenables arm and pose notifications, but
-        doesn't disable raw data.
+        '''Myo Connect sends this sequence (or a reordering) when ending data
+        collection for v1.0 firmware; this reenables arm and pose
+        notifications, but doesn't disable raw data.
         '''
 
         self.write_attr(0x28, b'\x01\x00')
@@ -372,9 +391,8 @@ class MyoRaw(object):
 
     def vibrate(self, length):
         if length in xrange(1, 4):
-            ## first byte tells it to vibrate; purpose of second byte is unknown
+            # first byte tells it to vibrate; purpose of second byte is unknown
             self.write_attr(0x19, pack('3B', 3, 1, length))
-
 
     def add_emg_handler(self, h):
         self.emg_handlers.append(h)
@@ -387,7 +405,6 @@ class MyoRaw(object):
 
     def add_arm_handler(self, h):
         self.arm_handlers.append(h)
-
 
     def on_emg(self, emg, moving):
         for h in self.emg_handlers:
@@ -407,79 +424,22 @@ class MyoRaw(object):
 
 
 if __name__ == '__main__':
-    try:
-        import pygame
-        from pygame.locals import *
-        HAVE_PYGAME = True
-    except ImportError:
-        HAVE_PYGAME = False
-
-    if HAVE_PYGAME:
-        w, h = 1200, 400
-        scr = pygame.display.set_mode((w, h))
-
-    last_vals = None
-    def plot(scr, vals):
-        DRAW_LINES = False
-
-        global last_vals
-        if last_vals is None:
-            last_vals = vals
-            return
-
-        D = 5
-        scr.scroll(-D)
-        scr.fill((0,0,0), (w - D, 0, w, h))
-        for i, (u, v) in enumerate(zip(last_vals, vals)):
-            if DRAW_LINES:
-                pygame.draw.line(scr, (0,255,0),
-                                 (w - D, int(h/8 * (i+1 - u))),
-                                 (w, int(h/8 * (i+1 - v))))
-                pygame.draw.line(scr, (255,255,255),
-                                 (w - D, int(h/8 * (i+1))),
-                                 (w, int(h/8 * (i+1))))
-            else:
-                c = int(255 * max(0, min(1, v)))
-                scr.fill((c, c, c), (w - D, i * h / 8, D, (i + 1) * h / 8 - i * h / 8));
-
-        pygame.display.flip()
-        last_vals = vals
-
     m = MyoRaw(sys.argv[1] if len(sys.argv) >= 2 else None)
 
     def proc_emg(emg, moving, times=[]):
-        if HAVE_PYGAME:
-            ## update pygame display
-            plot(scr, [e / 2000. for e in emg])
-        else:
-            print(emg)
+        print(emg)
 
-        ## print framerate of received data
+        # print framerate of received data
         times.append(time.time())
         if len(times) > 20:
-            #print((len(times) - 1) / (times[-1] - times[0]))
             times.pop(0)
 
     m.add_emg_handler(proc_emg)
     m.connect()
 
-    m.add_arm_handler(lambda arm, xdir: print('arm', arm, 'xdir', xdir))
-    m.add_pose_handler(lambda p: print('pose', p))
-
     try:
         while True:
             m.run(1)
-
-            if HAVE_PYGAME:
-                for ev in pygame.event.get():
-                    if ev.type == QUIT or (ev.type == KEYDOWN and ev.unicode == 'q'):
-                        raise KeyboardInterrupt()
-                    elif ev.type == KEYDOWN:
-                        if K_1 <= ev.key <= K_3:
-                            m.vibrate(ev.key - K_0)
-                        if K_KP1 <= ev.key <= K_KP3:
-                            m.vibrate(ev.key - K_KP0)
-
     except KeyboardInterrupt:
         pass
     finally:
