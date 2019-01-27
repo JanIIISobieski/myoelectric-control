@@ -5,18 +5,20 @@
     Edited by Fernando Cosentino for the recording framework
         http://www.fernandocosentino.net/pyoconnect
 
-    Edited by Gabriel Antoniak to establish the procedure
+    Edited by Gabriel Antoniak to establish hand posture
 '''
 
 
 from __future__ import print_function
 
+from collections import deque
+import struct
 import enum
 import re
-import struct
 import sys
 import threading
 import time
+import numpy as np
 
 import serial
 from serial.tools.list_ports import comports
@@ -194,7 +196,7 @@ class BT(object):
 class MyoRaw(object):
     '''Implements the Myo-specific communication protocol.'''
 
-    def __init__(self, tty=None):
+    def __init__(self, tty=None, emg_length=200):
         if tty is None:
             tty = self.detect_tty()
         if tty is None:
@@ -206,6 +208,9 @@ class MyoRaw(object):
         self.imu_handlers = []
         self.arm_handlers = []
         self.pose_handlers = []
+        self.length_emg = emg_length
+        self.full_emg = deque([], emg_length)
+        self.old_trials = []
 
     def detect_tty(self):
         for p in comports():
@@ -309,6 +314,11 @@ class MyoRaw(object):
                 emg = vals[:8]
                 moving = vals[8]
                 self.on_emg(emg, moving)
+                self.full_emg.append(emg)
+                if len(self.full_emg) == self.length_emg:
+                    print(self.full_emg)
+                    self.old_trials.append(np.asarray(self.full_emg))
+                    self.full_emg.clear()
             elif attr == 0x1c:
                 vals = unpack('10h', pay)
                 quat = vals[:4]
@@ -425,16 +435,6 @@ class MyoRaw(object):
 
 if __name__ == '__main__':
     m = MyoRaw(sys.argv[1] if len(sys.argv) >= 2 else None)
-
-    def proc_emg(emg, moving, times=[]):
-        print(emg)
-
-        # print framerate of received data
-        times.append(time.time())
-        if len(times) > 20:
-            times.pop(0)
-
-    m.add_emg_handler(proc_emg)
     m.connect()
 
     try:
@@ -442,6 +442,7 @@ if __name__ == '__main__':
             m.run(1)
     except KeyboardInterrupt:
         pass
+    
     finally:
         m.disconnect()
         print()
