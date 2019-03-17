@@ -45,7 +45,7 @@ class Pose(enum.Enum):
 class MyoRaw(object):
     '''Implements the Myo-specific communication protocol.'''
 
-    def __init__(self, tty=None, emg_length=100):
+    def __init__(self, tty=None, emg_length=200):
         if tty is None:
             tty = self.detect_tty()
         if tty is None:
@@ -266,6 +266,8 @@ class MyoRaw(object):
         if len(self.full_emg) == self.length_emg:
             time_new = time.time()
             self.old_trials.append(np.asarray(self.full_emg))
+            self.emg_decoder.predict(self.full_emg)
+            print(self.emg_decoder.predicted)
             print(time_new - self.time_old)
             self.full_emg.clear()
             self.time_old = time.time()

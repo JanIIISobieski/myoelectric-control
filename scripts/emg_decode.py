@@ -29,7 +29,7 @@ class EMG_Decode():
 
     def get_wavelet_coeffs(self):
         num = 0
-        for electrodes in self.emg:
+        for electrodes in self.emg.T:
             cA3, cD3, cD2, cD1 = pywt.wavedec(electrodes, wavelet='db9',
                                               mode='zero', level=3)
             self.wavelet_coeffs[num, :] = np.concatenate((cD1, cD2, cD3, cA3))
@@ -37,7 +37,7 @@ class EMG_Decode():
         self.wavelet_coeffs = self.wavelet_coeffs.reshape((1, 248, 8, 1))
 
     def get_RMS(self):
-        self.rms = np.sqrt(np.mean(np.square(self.emg), axis=1))
+        self.rms = np.sqrt(np.mean(np.square(self.emg), axis=0))
         self.rms = self.rms.reshape(1, self.num_electrodes)
 
     def predict(self, emg):
