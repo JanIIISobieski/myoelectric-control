@@ -5,20 +5,22 @@
     Edited by Fernando Cosentino for the recording framework
         http://www.fernandocosentino.net/pyoconnect
 
-    Edited by Gabriel Antoniak to establish hand posture
+    Edited by Gabriel Antoniak to establish hand posture using eNable framework
 '''
 
 
 from __future__ import print_function
 
 from collections import deque
-import struct
 import enum
 import re
 import sys
 import threading
 import time
 import numpy as np
+
+import keras
+from keras.models import load_model
 
 import serial
 from serial.tools.list_ports import comports
@@ -196,7 +198,7 @@ class BT(object):
 class MyoRaw(object):
     '''Implements the Myo-specific communication protocol.'''
 
-    def __init__(self, tty=None, emg_length=200):
+    def __init__(self, tty=None, emg_length=100):
         if tty is None:
             tty = self.detect_tty()
         if tty is None:
@@ -209,8 +211,10 @@ class MyoRaw(object):
         self.arm_handlers = []
         self.pose_handlers = []
         self.length_emg = emg_length
-        self.full_emg = deque([], emg_length)
+        self.full_emg = []
         self.old_trials = []
+        self.time_old = time.time()
+        self.model = load_model('best_two_branch_NN_EMG.hdf5')
 
     def detect_tty(self):
         for p in comports():
@@ -279,7 +283,6 @@ class MyoRaw(object):
             emg_hz = 200
             # strength of low-pass filtering of EMG data
             emg_smooth = 100
-
             imu_hz = 50
 
             # send sensor parameters, or we don't get any data
@@ -296,7 +299,7 @@ class MyoRaw(object):
             self.write_attr(0x24, b'\x02\x00')
 
             # self.write_attr(0x19, b'\x01\x03\x00\x01\x01')
-            self.start_raw()
+            self.mc_start_collection()
 
         # add data handlers
         def handle_data(p):
@@ -314,11 +317,6 @@ class MyoRaw(object):
                 emg = vals[:8]
                 moving = vals[8]
                 self.on_emg(emg, moving)
-                self.full_emg.append(emg)
-                if len(self.full_emg) == self.length_emg:
-                    print(self.full_emg)
-                    self.old_trials.append(np.asarray(self.full_emg))
-                    self.full_emg.clear()
             elif attr == 0x1c:
                 vals = unpack('10h', pay)
                 quat = vals[:4]
@@ -400,7 +398,7 @@ class MyoRaw(object):
         self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
 
     def vibrate(self, length):
-        if length in xrange(1, 4):
+        if length in np.xrange(1, 4):
             # first byte tells it to vibrate; purpose of second byte is unknown
             self.write_attr(0x19, pack('3B', 3, 1, length))
 
@@ -417,8 +415,15 @@ class MyoRaw(object):
         self.arm_handlers.append(h)
 
     def on_emg(self, emg, moving):
-        for h in self.emg_handlers:
-            h(emg, moving)
+        self.full_emg.append(emg)
+        if len(self.full_emg) == self.length_emg:
+            time_new = time.time()
+            self.old_trials.append(np.asarray(self.full_emg))
+            print(time_new - self.time_old)
+            self.full_emg.clear()
+            self.time_old = time.time()
+        # for h in self.emg_handlers:
+        #     h(emg, moving)
 
     def on_imu(self, quat, acc, gyro):
         for h in self.imu_handlers:
@@ -442,7 +447,7 @@ if __name__ == '__main__':
             m.run(1)
     except KeyboardInterrupt:
         pass
-    
+
     finally:
         m.disconnect()
         print()
