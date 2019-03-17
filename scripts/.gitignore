@@ -1,1 +1,4 @@
 .ipynb_checkpoints
+
+# Model files
+*.hdf5
