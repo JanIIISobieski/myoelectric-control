@@ -6,12 +6,13 @@
         http://www.fernandocosentino.net/pyoconnect
 
     Seperated from the main file by Gabriel Antoniak to improve code
-    legibility. Additional changes to add the hooks for analyzing EMG.
+    legibility. Additional changes to add the hooks for analyzing EMG and
+    saving EMG data
 '''
 
 import enum
-import time
 import re
+import pickle
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from common import pack, unpack
 from serial.tools.list_ports import comports
 
 from emg_decode import EMG_Decode
+from arduino_communication import Arduino
 
 class Arm(enum.Enum):
     UNKNOWN = 0
@@ -45,7 +47,7 @@ class Pose(enum.Enum):
 class MyoRaw(object):
     '''Implements the Myo-specific communication protocol.'''
 
-    def __init__(self, tty=None, emg_length=200):
+    def __init__(self, tty=None, emg_length=200, save=False, save_name="saved.pkl"):
         if tty is None:
             tty = self.detect_tty()
         if tty is None:
@@ -59,9 +61,11 @@ class MyoRaw(object):
         self.pose_handlers = []
         self.length_emg = emg_length
         self.full_emg = []
-        self.old_trials = []
-        self.time_old = time.time()
-        self.emg_decoder = EMG_Decode("model.hdf5")
+        self.emg_decoder = EMG_Decode("window_size_25.hdf5")
+        self.arduino = Arduino()
+        self.last_action = 0
+        self.save = save
+        self.save_name = save_name
 
     def detect_tty(self):
         for p in comports():
@@ -106,6 +110,7 @@ class MyoRaw(object):
         self.old = (v0 == 0)
 
         if self.old:
+            print("self.old was met")
             # don't know what these do; Myo Connect sends them,
             # though we get data
             # fine without them
@@ -264,15 +269,19 @@ class MyoRaw(object):
     def on_emg(self, emg, moving):
         self.full_emg.append(emg)
         if len(self.full_emg) == self.length_emg:
-            time_new = time.time()
-            self.old_trials.append(np.asarray(self.full_emg))
-            self.emg_decoder.predict(self.full_emg)
-            print(self.emg_decoder.predicted)
-            print(time_new - self.time_old)
-            self.full_emg.clear()
-            self.time_old = time.time()
-        # for h in self.emg_handlers:
-        #     h(emg, moving)
+            try:
+                self.emg_decoder.predict(self.full_emg)
+                if (((self.emg_decoder.prediction > 0) & (self.emg_decoder.prediction < 3)) & (self.last_action != self.emg_decoder.prediction)):
+                    print(self.emg_decoder.prediction)
+                    self.arduino.send_through_serial(self.emg_decoder.prediction)
+                    self.arduino.wait_for_response()
+                    self.last_action = self.emg_decoder.prediction
+                if self.save:
+                    self.save_data()
+                    print("saved")
+                self.full_emg.clear()
+            except:
+                print("Cannot predict")
 
     def on_imu(self, quat, acc, gyro):
         for h in self.imu_handlers:
@@ -285,3 +294,7 @@ class MyoRaw(object):
     def on_arm(self, arm, xdir):
         for h in self.arm_handlers:
             h(arm, xdir)
+
+    def save_data(self):
+        with open(self.save_name, 'wb') as pkl:
+            pickle.dump(self.full_emg, pkl, protocol=pickle.HIGHEST_PROTOCOL)

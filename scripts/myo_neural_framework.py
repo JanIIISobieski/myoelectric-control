@@ -6,11 +6,10 @@
 
 
 from __future__ import print_function
-import sys
 from myo_raw import MyoRaw
 
 if __name__ == '__main__':
-    myoband = MyoRaw(sys.argv[1] if len(sys.argv) >= 2 else None, 200)
+    myoband = MyoRaw(None, 25)
     myoband.connect()
 
     try:
@@ -20,5 +19,6 @@ if __name__ == '__main__':
         pass
 
     finally:
+        myoband.arduino.port.close()
         myoband.disconnect()
         print("Done")
