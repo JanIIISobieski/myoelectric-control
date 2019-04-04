@@ -13,6 +13,7 @@
 import enum
 import re
 import pickle
+import time
 
 import numpy as np
 
@@ -66,6 +67,7 @@ class MyoRaw(object):
         self.last_action = 0
         self.save = save
         self.save_name = save_name
+        self.last_movement_time = -1000
 
     def detect_tty(self):
         for p in comports():
@@ -271,7 +273,8 @@ class MyoRaw(object):
         if len(self.full_emg) == self.length_emg:
             try:
                 self.emg_decoder.predict(self.full_emg)
-                if (((self.emg_decoder.prediction > 0) & (self.emg_decoder.prediction < 3)) & (self.last_action != self.emg_decoder.prediction)):
+                current_time = time.time()
+                if ((((self.emg_decoder.prediction > 0) & (self.emg_decoder.prediction < 3)) & (self.last_action != self.emg_decoder.prediction)) & (current_time - self.last_movement_time > 3)):
                     print(self.emg_decoder.prediction)
                     self.arduino.send_through_serial(self.emg_decoder.prediction)
                     self.arduino.wait_for_response()
@@ -280,7 +283,8 @@ class MyoRaw(object):
                     self.save_data()
                     print("saved")
                 self.full_emg.clear()
-            except:
+            except Exception as e:
+                print(e)
                 print("Cannot predict")
 
     def on_imu(self, quat, acc, gyro):
