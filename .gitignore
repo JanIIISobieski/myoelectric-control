@@ -1,2 +1,5 @@
 # PyConnect files
 __pycache__
+
+# Model files
+*.hdf5
