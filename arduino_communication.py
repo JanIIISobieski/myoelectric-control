@@ -2,7 +2,7 @@ import time
 import serial
 
 class Arduino():
-    def __init__(self, port='/dev/ttyACM1', baud_rate=9600):
+    def __init__(self, port='/dev/ttyACM0', baud_rate=9600):
         self.port = serial.Serial(port, baud_rate)
         self.value_recieved = []
         self.timeout = 5

@@ -3,3 +3,7 @@ __pycache__
 
 # Model files
 *.hdf5
+
+#Pickle files
+*.pickle
+*.pkl
